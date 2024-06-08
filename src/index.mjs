@@ -374,7 +374,17 @@ async function loadJson(sink, file, real, limits) {
   }
 }
 
-const refusalKey = (segment, directive) => `${segment} ${directive}`
+/**
+ * The pair key used to match an observed refusal against a declared one.
+ *
+ * The separator is built from its code point rather than written as a literal:
+ * a raw NUL in a source file is invisible in every editor and survives review,
+ * and this package refuses control characters everywhere else. It cannot occur
+ * in either half -- both are identifiers, and an identifier carrying a control
+ * character is refused at the door -- so the key is unambiguous.
+ */
+const KEY_SEPARATOR = String.fromCharCode(0)
+const refusalKey = (segment, directive) => `${segment}${KEY_SEPARATOR}${directive}`
 
 /**
  * Why one request did not apply, in the words that match the guard that stopped
@@ -517,7 +527,7 @@ function evaluateScenario(sink, file, policy, scenario, limits, state) {
 
   for (const [key, reason] of boundary) {
     if (declared.has(key)) continue
-    const [segment, directive] = key.split(' ')
+    const [segment, directive] = key.split(KEY_SEPARATOR)
     sink.add({
       file,
       ruleId: 'refusal-undeclared',

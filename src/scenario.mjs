@@ -26,6 +26,13 @@ export const REFUSAL_KEYS = Object.freeze(['directive', 'reason', 'segment'])
  */
 export const SCENARIO_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
 
+/**
+ * Separates the two halves of a duplicate-detection key. Built from its code
+ * point: a literal control character in a source file is invisible, and both
+ * halves are identifiers, which may not contain one.
+ */
+const PAIR_SEPARATOR = String.fromCharCode(1)
+
 const MAX_TITLE_LENGTH = 200
 const MAX_SOURCE_LENGTH = 200
 
@@ -243,7 +250,7 @@ function compileRefusals(sink, file, scenarioPointer, raw, segments) {
       usable = false
       continue
     }
-    const key = `${entry.segment}${entry.directive}`
+    const key = `${entry.segment}${PAIR_SEPARATOR}${entry.directive}`
     if (seen.has(key)) {
       sink.add({ file, ruleId: 'scenario-invalid', pointer, message: `expectRefusals entry ${index} repeats a pair already declared in this scenario.` })
       usable = false
