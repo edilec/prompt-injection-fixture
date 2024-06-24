@@ -9,10 +9,11 @@
  * fails if one does not.
  */
 
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { renderedBanner } from '../src/index.mjs'
 import { cliRun, fixture, marker, policyOf, policyWithAuthority, scenario, scenariosOf } from './support.mjs'
 
 const RLO = String.fromCharCode(0x202e)
@@ -136,10 +137,25 @@ export const RULE_CASES = Object.freeze([
   { ruleId: 'no-scenarios', files: fixture(policyOf(), scenariosOf([])) },
   { ruleId: 'no-segments-evaluated', files: fixture(), args: ['--max-segment-chars', '1'] },
   {
+    /**
+     * A destination this tool wrote before, now read-only.
+     *
+     * The write guard clears it -- it is a regular file, in the named
+     * directory, and not one of the inputs -- and the banner guard clears it
+     * too, so the failure happens at the open, which is what this rule is for.
+     * A directory at the destination no longer reaches here: the write guard
+     * refuses that before anything is opened, as a configuration error with no
+     * report at all. (Read-only means read-only for the user running the
+     * suite; as root nothing is.)
+     */
     ruleId: 'output-unwritable',
     files: fixture(),
     useOut: true,
-    setup: async ({ out }) => mkdir(join(out, `${scenario().id}.fixture.txt`)),
+    setup: async ({ out }) => {
+      const target = join(out, `${scenario().id}.fixture.txt`)
+      await writeFile(target, `${renderedBanner()}\nrendered earlier\n`)
+      await chmod(target, 0o444)
+    },
   },
   {
     ruleId: 'output-would-overwrite',

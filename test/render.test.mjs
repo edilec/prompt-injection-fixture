@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { chmod, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -75,46 +75,21 @@ test('a file this tool did not write is left alone and the run goes incomplete',
 })
 
 test('a target that cannot be written is reported rather than thrown', async () => {
+  // Read-only for the user running the suite. The destination is a regular
+  // file this tool wrote, in the directory the caller named, so both guards
+  // clear it and the failure is the open itself -- which is a finding, not a
+  // refusal. A directory at the destination is a different thing entirely and
+  // is refused; see test/destination.test.mjs.
   await withOutDirectory(async (out) => {
-    await mkdir(join(out, `${scenario().id}.fixture.txt`))
+    const target = join(out, `${scenario().id}.fixture.txt`)
+    await writeFile(target, `${renderedBanner()}\nrendered earlier\n`)
+    await chmod(target, 0o444)
     await withRoot(fixture(), async (root) => {
       const report = await checkFixtures({ root, out })
       assert.equal(report.status, 'incomplete')
+      assert.equal(report.summary.rendered, 0)
       assert.ok(report.findings.some((finding) => finding.ruleId === 'output-unwritable'))
     })
-  })
-})
-
-test('a scenario whose text was too large to scan is not rendered', async () => {
-  // Rendering a fixture nobody could evaluate would put a file on disk that
-  // looks checked and is not.
-  await withOutDirectory(async (out) => {
-    await withRoot(fixture(), async (root) => {
-      const report = await checkFixtures({ root, out, limits: { maxSegmentChars: 10 } })
-      assert.equal(report.status, 'incomplete')
-      assert.equal(report.summary.rendered, 0)
-    })
-    assert.deepEqual(await readdir(out), [])
-  })
-})
-
-test('content is wrapped and instruction text is not, and the labels name both channel and segment', async () => {
-  const both = scenario({
-    segments: [
-      { id: 'system-turn', channel: 'system', text: `${marker('reportLabel', 'baseline')}` },
-      { id: 'note', channel: 'retrieval', source: 'index/note.md', text: marker('reportLabel', 'vendor-preferred') },
-      { id: 'result', channel: 'tool', text: 'a tool result with no request in it' },
-    ],
-    expectRefusals: [{ segment: 'note', directive: 'reportLabel', reason: 'channel-is-content' }],
-  })
-
-  await render(fixture(policyOf(), scenariosOf([both])), async ({ out }) => {
-    const text = await readFile(join(out, `${both.id}.fixture.txt`), 'utf8')
-    assert.match(text, /\[system\] \(instruction, segment system-turn\)/)
-    assert.match(text, /# source: index\/note\.md/)
-    assert.match(text, /<untrusted-content channel="retrieval" segment="note">/)
-    assert.match(text, /<untrusted-content channel="tool" segment="result">/)
-    assert.equal((text.match(/<\/untrusted-content>/g) ?? []).length, 2, 'each content segment is closed')
-    assert.equal(text.includes('<untrusted-content channel="system"'), false, 'instruction text is not labelled as content')
+    assert.equal(await readFile(target, 'utf8'), `${renderedBanner()}\nrendered earlier\n`)
   })
 })

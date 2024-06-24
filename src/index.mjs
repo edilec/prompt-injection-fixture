@@ -19,10 +19,12 @@
  * environment variable, and never sends anything anywhere.
  */
 
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { lstat, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 
 import { breakoutMarkers, renderFixture, renderedBanner, runMockAgent } from './agent.mjs'
+import { DestinationError, assertWritableDestination } from './destination.mjs'
 import { compilePolicy, isDirectiveValue } from './policy.mjs'
 import { compileScenarios } from './scenario.mjs'
 import { byCodeUnit, decodeUtf8, excerpt, hasForbiddenCharacter, isPlainObject, parseFailureDetail } from './text.mjs'
@@ -131,6 +133,16 @@ const SUGGESTION_LIMIT = 300
 const LOCATION_LIMIT = 200
 const MAX_NAME_LENGTH = 200
 const RENDERED_SUFFIX = '.fixture.txt'
+
+/**
+ * Create or truncate, and refuse to follow a link at the last component.
+ *
+ * `assertWritableDestination` refuses a symbolic link on sight, before anything
+ * is opened. This flag closes the window between that check and the open: a
+ * link planted in between is an ELOOP from the kernel rather than a write
+ * through it. Two independent checks because one of them can be raced.
+ */
+const WRITE_NO_FOLLOW = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW
 
 const ALLOWED_OPTIONS = Object.freeze(['limits', 'out', 'policy', 'root', 'scenarios'])
 
@@ -585,14 +597,35 @@ function evaluateScenario(sink, file, policy, scenario, limits, state) {
 /**
  * Write one rendered fixture, refusing to destroy anything this tool did not write.
  *
- * The overwrite guard reads the first line of an existing file and compares it
- * with the generated banner. A generator that clobbers whatever is at the path
- * it was pointed at is a generator that eventually eats a hand-written file,
- * and "it was in the output directory" is not consent.
+ * Two independent guards, because they answer different questions.
+ *
+ * `assertWritableDestination` answers *which file is this path*. A symbolic
+ * link at the destination, a symbolic link on the way to it, or a hard link to
+ * one of the inputs all name a file somewhere other than the one the caller
+ * asked for, and each of the three is invisible to the other two checks. This
+ * tool shipped without it: a link planted in `--out` sent a rendered fixture to
+ * a file outside the directory, destroyed it, and the run reported `pass` and
+ * exited 0. A refused destination is a configuration error -- the run stops, the
+ * report is never written, and stdout stays empty -- because an output directory
+ * holding a planted link is not a directory anything else should be written to
+ * either.
+ *
+ * The banner guard answers *whose file is this*. A generator that clobbers
+ * whatever is at the path it was pointed at eventually eats a hand-written file,
+ * and "it was in the output directory" is not consent. That one is a finding
+ * rather than a refusal: the file is real, it is where the caller said, and the
+ * only thing wrong with it is that somebody else wrote it.
+ *
+ * @throws {DestinationError} when the destination is not the file it names.
  */
-async function writeRendered(sink, file, outDirectory, scenario, text) {
-  const target = join(outDirectory, `${scenario.id}${RENDERED_SUFFIX}`)
+async function writeRendered(sink, file, outDirectory, inputs, scenario, text) {
   const relative = `${scenario.id}${RENDERED_SUFFIX}`
+  const target = await assertWritableDestination(join(outDirectory, relative), {
+    inputs,
+    root: outDirectory,
+    label: `--out entry ${relative}`,
+  })
+
   let existing = null
   try {
     existing = await readFile(target, 'utf8')
@@ -613,7 +646,7 @@ async function writeRendered(sink, file, outDirectory, scenario, text) {
     return false
   }
   try {
-    await writeFile(target, text)
+    await writeFile(target, text, { flag: WRITE_NO_FOLLOW })
   } catch (error) {
     sink.add({ file, ruleId: 'output-unwritable', pointer: scenario.pointer, message: `${relative} could not be written: ${error.code ?? 'unknown error'}.` })
     return false
@@ -667,6 +700,23 @@ export async function checkFixtures(options = {}) {
   let realOut = null
   if (options.out !== undefined) {
     if (typeof options.out !== 'string' || options.out.length === 0) throw new TypeError('out must be a non-empty string')
+    /**
+     * The directory itself is refused when it is a symbolic link, before it is
+     * resolved. Resolving is the dangerous act: `--out rendered` where
+     * `rendered` is a link deposits every fixture wherever the link points,
+     * which is not the path the caller named. Only the last component is
+     * checked, so a root reached through a linked ancestor -- `/tmp` on macOS,
+     * every temporary directory under it -- still works.
+     */
+    let entry = null
+    try {
+      entry = await lstat(resolve(options.out))
+    } catch (error) {
+      throw new Error(`--out could not be inspected: ${error.code ?? 'unknown error'}`)
+    }
+    if (entry.isSymbolicLink()) {
+      throw new Error('--out is a symbolic link, so the fixtures would be written wherever it points rather than where you named. Name the real directory.')
+    }
     try {
       realOut = await realpath(options.out)
     } catch (error) {
@@ -689,8 +739,11 @@ export async function checkFixtures(options = {}) {
   const counts = { scenarios: 0, segments: 0, contentSegments: 0, scenariosName }
 
   const documents = {}
+  /** The real path of every file this run read, for the hard-link check in the write guard. */
+  const realInputs = []
   for (const [kind, name] of [['policy', policyName], ['scenarios', scenariosName]]) {
     const located = await resolveInput(realRoot, name)
+    if (located.ok) realInputs.push(located.real)
     if (!located.ok) {
       state.incomplete = true
       if (located.reason === 'escapes') {
@@ -792,7 +845,7 @@ export async function checkFixtures(options = {}) {
 
     if (realOut !== null) {
       for (const scenario of renderable) {
-        const written = await writeRendered(sink, scenariosName, realOut, scenario, renderFixture(policy, scenario))
+        const written = await writeRendered(sink, scenariosName, realOut, realInputs, scenario, renderFixture(policy, scenario))
         if (written) state.rendered += 1
         else state.incomplete = true
       }
