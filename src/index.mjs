@@ -433,15 +433,27 @@ function evaluateScenario(sink, file, policy, scenario, limits, state) {
   state.refusals += run.refusals.length
   state.applications += run.applications.length
 
+  /**
+   * A segment carrying the envelope's own markers is never rendered.
+   *
+   * The finding says the content would close or forge its own label; writing
+   * the file anyway would hand a fixture runner exactly that file, with one
+   * segment's text closing the envelope after a line and the rest of the
+   * transcript sitting inside a block the content labelled itself. Detecting an
+   * escape and then producing it is not a guard, so `breakout` travels back to
+   * the caller and the scenario is left unrendered.
+   */
+  let breakout = false
   for (const segment of scenario.segments) {
     if (segment.oversize) continue
     const hits = breakoutMarkers(policy, segment.text)
     if (hits.length > 0) {
+      breakout = true
       sink.add({
         file,
         ruleId: 'envelope-breakout',
         pointer: `${segment.pointer}/text`,
-        message: `Segment "${segment.id}" on channel "${segment.channel.name}" contains the envelope marker itself, so rendering it would let the content close or forge its own label.`,
+        message: `Segment "${segment.id}" on channel "${segment.channel.name}" contains the envelope marker itself, so rendering it would let the content close or forge its own label; the scenario was not rendered.`,
         evidence: `marker ${hits.map((hit) => JSON.stringify(hit)).sort(byCodeUnit).join(' ')}`,
         suggestion: 'Escape the marker in the fixture text, or choose an envelope whose markers cannot occur in your content.',
       })
@@ -591,7 +603,7 @@ function evaluateScenario(sink, file, policy, scenario, limits, state) {
       suggestion: 'Add a content segment carrying a [[set ...]] marker, or keep this scenario only for the labelling checks.',
     })
   }
-  return { challenged, renderable: scenario.segments.every((segment) => !segment.oversize) }
+  return { challenged, renderable: !breakout && scenario.segments.every((segment) => !segment.oversize) }
 }
 
 /**
