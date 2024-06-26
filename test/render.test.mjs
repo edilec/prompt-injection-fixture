@@ -136,3 +136,26 @@ test('a scenario that does not break out is still rendered alongside one that do
     assert.deepEqual(await readdir(out), [`${scenario().id}.fixture.txt`])
   })
 })
+
+test('two ids that differ only in case are refused, and only one file is written', async () => {
+  // On a case-insensitive filesystem -- the default on macOS -- Alpha and
+  // alpha are one file, so the second render replaces the first and the
+  // overwrite guard cannot see it: the banner it finds is one this tool wrote.
+  await withOutDirectory(async (out) => {
+    const files = fixture(policyOf(), scenariosOf([
+      scenario({ id: 'Alpha' }),
+      scenario({ id: 'alpha' }),
+    ]))
+    await withRoot(files, async (root) => {
+      const report = await checkFixtures({ root, out })
+      assert.equal(report.status, 'incomplete')
+      const duplicate = report.findings.filter((finding) => finding.ruleId === 'scenario-duplicate')
+      assert.equal(duplicate.length, 1)
+      assert.match(duplicate[0].message, /differs from "Alpha" only in case/)
+      assert.equal(report.summary.rendered, 1, 'the second scenario never reached the renderer')
+    })
+    assert.deepEqual(await readdir(out), ['Alpha.fixture.txt'])
+    const text = await readFile(join(out, 'Alpha.fixture.txt'), 'utf8')
+    assert.match(text, /^# scenario: Alpha$/m, 'the file holds the scenario it is named after')
+  })
+})

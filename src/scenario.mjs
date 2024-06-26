@@ -298,6 +298,7 @@ export function compileScenarios(sink, file, document, policy, limits) {
   const budget = { remaining: limits.maxSegments, maxSegmentChars: limits.maxSegmentChars }
   const scenarios = []
   const seen = new Set()
+  const folded = new Map()
 
   for (const [index, entry] of document.scenarios.entries()) {
     const pointer = `/scenarios/${index}`
@@ -340,6 +341,29 @@ export function compileScenarios(sink, file, document, policy, limits) {
       })
       continue
     }
+    /**
+     * Ids that differ only in case are a collision too.
+     *
+     * The id names the rendered file, and on a case-insensitive filesystem --
+     * the default on macOS and on Windows -- `Alpha` and `alpha` are one file.
+     * The second render replaces the first, the overwrite guard cannot see it
+     * because the banner it finds is one this tool wrote, and the report says
+     * two fixtures were rendered. The fold is ASCII-only by construction:
+     * SCENARIO_ID admits nothing else, so this comparison does not depend on a
+     * locale or on any ICU data, and the collision is refused on every
+     * filesystem rather than only on the ones where it would bite.
+     */
+    const collision = folded.get(entry.id.toLowerCase())
+    if (collision !== undefined) {
+      sink.add({
+        file,
+        ruleId: 'scenario-duplicate',
+        pointer: `${pointer}/id`,
+        message: `Scenario "${entry.id}" differs from "${collision}" only in case, and the id names the rendered file, so on a case-insensitive filesystem one fixture would silently replace the other.`,
+        suggestion: 'Give the two scenarios ids that differ by more than case.',
+      })
+      continue
+    }
     if (entry.title !== undefined && (typeof entry.title !== 'string' || entry.title.length === 0 || entry.title.length > MAX_TITLE_LENGTH || hasForbiddenCharacter(entry.title))) {
       sink.add({ file, ruleId: 'scenario-invalid', pointer: `${pointer}/title`, message: `Scenario "${entry.id}" declares a title that is not a printable string of 1-${MAX_TITLE_LENGTH} characters.` })
       continue
@@ -364,6 +388,7 @@ export function compileScenarios(sink, file, document, policy, limits) {
     if (expectRefusals === null) continue
 
     seen.add(entry.id)
+    folded.set(entry.id.toLowerCase(), entry.id)
     scenarios.push(Object.freeze({
       id: entry.id,
       title: entry.title,
