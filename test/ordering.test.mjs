@@ -101,6 +101,53 @@ test('a list inside a message is ordered by code unit too', async () => {
   assert.match(findingsFor(report, 'expectation-incomplete')[0].message, /does not name README, assets,/)
 })
 
+test('the report is emitted in the documented order, not in the order it was produced', async () => {
+  /**
+   * `compareFindings` had a unit test; the report had none. Deleting
+   * `.sort(compareFindings)` -- its only call site -- left the whole suite
+   * green while stdout changed byte for byte, because every ordering fixture
+   * happened to be produced in sorted order already. That is report-contract
+   * defect class 7: an assertion that cannot fail is not a test.
+   *
+   * This fixture is produced in an order the sort has to change. Within one
+   * scenario the refusal findings are emitted first, from
+   * `/scenarios/N/segments/...`, and the scenario-level finding at
+   * `/scenarios/N` is emitted after them -- so a shorter pointer that must sort
+   * first arrives last. The scenario ids are chosen so the run also carries
+   * findings whose only difference is the rule id.
+   */
+  const files = fixture(policyOf(), scenariosOf([
+    scenario({
+      id: 'zebra',
+      segments: [
+        { id: 'system-turn', channel: 'system', text: marker('reportLabel', 'baseline') },
+        { id: 'vendor-note', channel: 'retrieval', text: marker('reportLabel', 'vendor-preferred') },
+      ],
+      expectRefusals: [],
+    }),
+    scenario({ id: 'apple' }),
+  ]))
+
+  const { report } = await cliReport(files)
+  assert.deepEqual(
+    report.findings.map((finding) => [finding.location.pointer, finding.ruleId]),
+    [
+      ['/scenarios/0', 'refusal-undeclared'],
+      ['/scenarios/0/segments/1/text', 'content-directive-refused'],
+      ['/scenarios/1/segments/1/text', 'content-directive-refused'],
+    ],
+    'the scenario-level finding is produced last and must be emitted first',
+  )
+})
+
+test('a shorter pointer sorts before a longer one that extends it', async () => {
+  // The pair the test above depends on, asserted directly so the intent
+  // survives a fixture change: '/scenarios/0' precedes '/scenarios/0/segments'
+  // by code unit because the shorter string is a prefix of the longer one.
+  assert.ok(byCodeUnit('/scenarios/0', '/scenarios/0/segments/1/text') < 0)
+  assert.ok(byCodeUnit('/scenarios/1/segments/1/text', '/scenarios/0') > 0)
+})
+
 test('two runs over identical inputs produce byte-identical stdout', async () => {
   const files = fixture(policyOf(), scenariosOf([
     scenario(),

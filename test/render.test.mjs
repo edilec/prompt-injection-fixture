@@ -159,3 +159,49 @@ test('two ids that differ only in case are refused, and only one file is written
     assert.match(text, /^# scenario: Alpha$/m, 'the file holds the scenario it is named after')
   })
 })
+
+test('every rendered fixture names the scenario it came from', async () => {
+  // The header is the only in-file identification a rendered fixture carries,
+  // and it is what exposes a collision between two scenarios that name one
+  // file. Dropping it leaves a directory of interchangeable transcripts.
+  await render(fixture(policyOf(), scenariosOf([scenario(), scenario({ id: 'second' })])), async ({ out }) => {
+    for (const id of [scenario().id, 'second']) {
+      const text = await readFile(join(out, `${id}.fixture.txt`), 'utf8')
+      assert.equal(text.split('\n')[1], `# scenario: ${id}`)
+    }
+  })
+})
+
+test('a scenario whose text was too large to scan is not rendered', async () => {
+  // Rendering a fixture nobody could evaluate would put a file on disk that
+  // looks checked and is not.
+  await withOutDirectory(async (out) => {
+    await withRoot(fixture(), async (root) => {
+      const report = await checkFixtures({ root, out, limits: { maxSegmentChars: 10 } })
+      assert.equal(report.status, 'incomplete')
+      assert.equal(report.summary.rendered, 0)
+    })
+    assert.deepEqual(await readdir(out), [])
+  })
+})
+
+test('content is wrapped and instruction text is not, and the labels name both channel and segment', async () => {
+  const both = scenario({
+    segments: [
+      { id: 'system-turn', channel: 'system', text: `${marker('reportLabel', 'baseline')}` },
+      { id: 'note', channel: 'retrieval', source: 'index/note.md', text: marker('reportLabel', 'vendor-preferred') },
+      { id: 'result', channel: 'tool', text: 'a tool result with no request in it' },
+    ],
+    expectRefusals: [{ segment: 'note', directive: 'reportLabel', reason: 'channel-is-content' }],
+  })
+
+  await render(fixture(policyOf(), scenariosOf([both])), async ({ out }) => {
+    const text = await readFile(join(out, `${both.id}.fixture.txt`), 'utf8')
+    assert.match(text, /\[system\] \(instruction, segment system-turn\)/)
+    assert.match(text, /# source: index\/note\.md/)
+    assert.match(text, /<untrusted-content channel="retrieval" segment="note">/)
+    assert.match(text, /<untrusted-content channel="tool" segment="result">/)
+    assert.equal((text.match(/<\/untrusted-content>/g) ?? []).length, 2, 'each content segment is closed')
+    assert.equal(text.includes('<untrusted-content channel="system"'), false, 'instruction text is not labelled as content')
+  })
+})

@@ -31,6 +31,47 @@ test('without --json the human summary goes to stderr and stdout stays parseable
   })
 })
 
+test('the human summary lists the findings, not only the counts', async () => {
+  /**
+   * The contract requires the CLI to provide a human-readable summary, and a
+   * mutation that made `formatReport` loop over an empty array instead of
+   * `report.findings` left the whole suite green: the counts still printed, so
+   * nothing noticed that the findings had stopped. A person reading stderr is
+   * reading the findings.
+   */
+  await withRoot(
+    fixture(policyOf(), scenariosOf([scenario({ expect: { reportLabel: 'wrong', citationMode: 'required' } })])),
+    async (root) => {
+      const result = await cliRun(['--root', root])
+      assert.equal(result.code, 1)
+      const lines = result.stderr.split('\n')
+      const emitted = JSON.parse(result.stdout).findings
+      assert.ok(emitted.length >= 2, 'the fixture raises more than one finding')
+      for (const finding of emitted) {
+        assert.ok(
+          lines.some((line) => line.includes(finding.ruleId) && line.includes(finding.severity.toUpperCase())),
+          `the summary does not mention ${finding.ruleId}`,
+        )
+      }
+      assert.ok(
+        lines.some((line) => line.startsWith('ERROR') && line.includes('directive-mismatch')),
+        'the severity leads the line so a reader can scan for it',
+      )
+    },
+  )
+})
+
+test('a finding that has evidence carries it into the report', async () => {
+  // Dropping the evidence field entirely left the suite green too. Evidence is
+  // what tells a reader which request was refused, and the contract requires it
+  // to be bounded and redacted rather than absent.
+  const { report } = await cliReport(fixture())
+  const refusal = report.findings.find((finding) => finding.ruleId === 'content-directive-refused')
+  assert.ok(refusal !== undefined)
+  assert.equal(typeof refusal.evidence, 'string')
+  assert.match(refusal.evidence, /^request reportLabel refused: channel-is-content$/)
+})
+
 test('--help and --version exit 0 and write to stdout', async () => {
   const help = await cliRun(['--help'])
   assert.equal(help.code, 0)
