@@ -21,8 +21,8 @@ test('the clean example exits 0 and refuses every content request', async () => 
   const report = JSON.parse(result.stdout)
 
   assert.equal(report.status, 'pass')
-  assert.equal(report.summary.scenarios, 3)
-  assert.equal(report.summary.evaluated, 3)
+  assert.equal(report.summary.scenarios, 4)
+  assert.equal(report.summary.evaluated, 4)
   assert.equal(report.summary.errors, 0)
   assert.equal(report.summary.warnings, 0)
   assert.ok(report.summary.challenges >= 4, 'each scenario actually exercises the boundary')
@@ -40,27 +40,34 @@ test('the broken example exits 1 and names the policy change', async () => {
 
   assert.equal(report.status, 'fail')
   const raised = new Set(report.findings.map((finding) => finding.ruleId))
-  for (const ruleId of ['precedence-violated', 'directive-mismatch', 'refusal-reason-mismatch', 'suite-unchallenged']) {
+  for (const ruleId of ['precedence-violated', 'directive-mismatch', 'refusal-reason-mismatch']) {
     assert.ok(raised.has(ruleId), `the broken example no longer demonstrates ${ruleId}`)
   }
-  assert.equal(report.summary.contentSegments, 0, 'promoting retrieval left the suite with no content channel in play')
+  assert.equal(report.summary.scenarios, 4, 'the same four fixtures, judged against the other policy')
+  assert.equal(report.summary.evaluated, 4, 'every scenario was evaluated; they disagreed with what they declared')
+  assert.ok(report.summary.contentSegments > 0, 'the tool and quoted channels are still content, so the suite still challenges')
 })
 
 test('the two examples differ only in the policy, which is what makes the point', async () => {
+  /**
+   * The claim in the README and the CHANGELOG is "one edit to the trust
+   * configuration, no edit to the fixture at all". The shipped pair did not
+   * hold it -- the two scenario files declared different scenarios with
+   * different text -- so the claim was carried by a unit test while the
+   * artifact a reader diffs said something else. The files are now the same
+   * bytes, and this asserts that rather than asserting one shared entry.
+   */
   const cleanPolicy = JSON.parse(await readFile(example('clean/policy.json'), 'utf8'))
   const brokenPolicy = JSON.parse(await readFile(example('broken/policy.json'), 'utf8'))
 
   const authority = (policy) => Object.fromEntries(policy.channels.map((channel) => [channel.name, channel.authority]))
   assert.equal(authority(cleanPolicy).retrieval, 'content')
   assert.equal(authority(brokenPolicy).retrieval, 'instruction')
+  assert.notDeepEqual(cleanPolicy, brokenPolicy, 'the policy is the edit')
 
-  const cleanScenarios = JSON.parse(await readFile(example('clean/scenarios.json'), 'utf8'))
-  const brokenScenarios = JSON.parse(await readFile(example('broken/scenarios.json'), 'utf8'))
-  assert.deepEqual(
-    brokenScenarios.scenarios[0],
-    cleanScenarios.scenarios[0],
-    'the first scenario is byte-for-byte the same fixture in both runs',
-  )
+  const cleanScenarios = await readFile(example('clean/scenarios.json'), 'utf8')
+  const brokenScenarios = await readFile(example('broken/scenarios.json'), 'utf8')
+  assert.equal(brokenScenarios, cleanScenarios, 'the fixtures are byte-for-byte the same file in both runs')
 })
 
 test('the README quick start commands are the ones that exist', async () => {
