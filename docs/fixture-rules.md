@@ -54,7 +54,7 @@ refusal silently disappearing is a failure rather than a quieter report.
 | `directive-mismatch` | error | A scenario's `expect` value differs from what the mock agent resolved. |
 | `directive-unknown` | error | An instruction channel asked to set a directive the policy does not declare. |
 | `directive-value-invalid` | error | An applied value is empty, over 200 characters, or carries a control, separator or bidi character. |
-| `envelope-breakout` | error | Segment text contains the envelope's own markers, so rendering would let the content close or forge its label. |
+| `envelope-breakout` | error | Segment text contains the envelope's own markers, so rendering would let the content close or forge its label. The scenario is not rendered. |
 | `envelope-unlabeled` | error | `envelope.open` does not interpolate both `{channel}` and `{id}`. |
 | `expectation-incomplete` | error | A scenario's `expect` does not name every declared directive. |
 | `expectation-unevaluated` | error | A limit stopped the scan, so the scenario's expected values were not compared. |
@@ -65,7 +65,7 @@ refusal silently disappearing is a failure rather than a quieter report.
 | `lower-precedence-refused` | info | A request was refused because a higher-precedence channel had already set that directive. |
 | `no-scenarios` | error | The scenario file declares no scenarios. |
 | `no-segments-evaluated` | error | Scenarios compiled but nothing was scanned. |
-| `output-unwritable` | error | A rendered fixture could not be written. |
+| `output-unwritable` | error | A rendered fixture could not be written; the destination was allowed, the open failed. |
 | `output-would-overwrite` | error | The target file exists and was not written by this tool, so it was left alone. |
 | `path-escapes-root` | error | An input's real path lies outside the real `--root`. |
 | `policy-channel-invalid` | error | A channel entry is malformed, duplicated, or has an authority outside `content` / `instruction`. |
@@ -74,7 +74,7 @@ refusal silently disappearing is a failure rather than a quieter report.
 | `precedence-violated` | error | A request the scenario declares must be refused was applied instead. |
 | `refusal-reason-mismatch` | error | A declared refusal happened, but for a different reason than the one declared. |
 | `refusal-undeclared` | error | A boundary refusal happened that the scenario does not declare. |
-| `scenario-duplicate` | error | Two scenarios share an id. |
+| `scenario-duplicate` | error | Two scenarios share an id, or two ids differ only in case and would name one rendered file. |
 | `scenario-invalid` | error | A scenario's id, title, `expect` or `expectRefusals` is malformed. |
 | `scenario-unchallenged` | warning | A scenario has no content-channel request for a directive. |
 | `segment-duplicate` | error | Two segments in one scenario share an id. |
@@ -146,6 +146,37 @@ refusal silently disappearing is a failure rather than a quieter report.
   one asserts which guard held.
 - `source` is metadata for the rendered header only. It is never opened: this
   tool reads the two files it was given and nothing else.
+
+## Writing rendered fixtures
+
+`--out` is a directory the caller names, and the file inside it is named by the
+scenario id. Both are checked before anything is opened, because a path is not a
+file: the caller named a path, and what the path resolves to is a separate
+question.
+
+| Refused | Why the obvious check misses it |
+| --- | --- |
+| `--out` is a symbolic link | `realpath` resolves it, and resolving is the dangerous act. Only the last component is checked, so an output directory reached through a linked ancestor -- every temporary directory on macOS -- still works. |
+| A symbolic link at the destination file | Same hole one level down. This one bit: a link planted in `--out` sent a rendered fixture to a file outside the directory, destroyed it, and the run reported `pass` and exited 0. The banner check made it worse -- the victim's first line was this tool's own banner, so the guard read it as this tool's own output. |
+| A destination whose resolved parent is outside `--out` | A lexical prefix check passes for `out/link/name` where `link` leaves the directory. The parent is resolved, then compared. |
+| A hard link to one of the inputs | It has no target to resolve and shares no path with the input, so `realpath` and string comparison both call it a different file. It is the same file; only device plus inode sees that. |
+| A destination that is not a regular file | A directory, a device node or a socket at the destination is not a fixture this tool wrote. |
+
+A refused destination is a **configuration error**: the run stops, exit code 2,
+nothing on stdout, and the diagnostic on stderr. An output directory holding a
+planted link is not a directory the rest of the fixtures should be written to
+either. The write itself then uses `O_NOFOLLOW`, so a link planted between the
+check and the open is an error from the kernel rather than a write through it.
+
+Two things are *not* refusals, because the destination is the file it claims to
+be and only the file's history is wrong:
+
+- an existing file that does not start with this tool's generated banner is left
+  alone, with `output-would-overwrite` and an `incomplete` run;
+- a file this tool wrote that cannot be opened for writing is reported as
+  `output-unwritable`, also `incomplete`.
+
+Re-rendering over this tool's own output is allowed and produces the same bytes.
 
 ## Limits
 

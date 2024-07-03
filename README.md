@@ -100,7 +100,7 @@ product:
 | `challenge-absent` | error | A declared request is no longer in the segment text, so the fixture stopped exercising the boundary. |
 | `refusal-undeclared` | error | A boundary refusal happened that the scenario does not declare. |
 | `directive-mismatch` | error | The mock agent resolved a directive to something other than `expect`. |
-| `envelope-breakout` | error | Content carries the envelope's own markers, so rendering it would let the content forge or close its label. |
+| `envelope-breakout` | error | Content carries the envelope's own markers, so rendering it would let the content forge or close its label. The scenario is not rendered. |
 | `suite-unchallenged` | error | No content channel anywhere in the file asked for anything, so the run asserts nothing. |
 | `expectation-unevaluated` | error | A limit stopped the scan, so the expected values were not compared. |
 
@@ -155,8 +155,20 @@ Each of these has a test that fails when the guarantee is removed.
   planted inside the root is refused unread.
 - **Output is deterministic and byte-identical** across runs, machines and Node
   builds. Ordering is by UTF-16 code unit.
-- **Rendering destroys nothing.** A file that does not start with this tool's
-  generated banner is left alone and the run goes `incomplete`.
+- **Rendering destroys nothing.** Three independent checks, because no one of
+  them catches the others: a symbolic link at the destination or at `--out`
+  itself is refused before it is resolved, a destination whose *resolved* parent
+  leaves `--out` is refused, and a hard link to one of the inputs is refused by
+  device and inode -- it shares no path with the input and is the same file. A
+  refused destination stops the run with exit 2 and no report. On top of that, a
+  real file that does not start with this tool's generated banner is left alone
+  and the run goes `incomplete`.
+- **Two scenario ids that differ only in case are a collision**, on every
+  filesystem, because the id names the rendered file and half the world's
+  filesystems are case-insensitive.
+- **Content that would escape its envelope is never written.** `envelope-breakout`
+  refuses the render as well as failing the run; detecting an escape and then
+  producing the file would hand a fixture runner exactly the unsafe artifact.
 
 ## Non-goals
 
@@ -180,7 +192,8 @@ These are boundaries on what this package is, not a to-do list.
   a guess wearing a guard's uniform.
 - **It does not fix anything.** It is read-only unless `--out` is given, and
   even then it writes only rendered fixtures into a directory outside the input
-  tree.
+  tree -- and only to destinations that are the file they name. See
+  [`docs/fixture-rules.md`](docs/fixture-rules.md#writing-rendered-fixtures).
 
 ## Verification
 
