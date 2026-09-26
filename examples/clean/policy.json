@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1",
+  "channels": [
+    {
+      "name": "system",
+      "authority": "instruction"
+    },
+    {
+      "name": "developer",
+      "authority": "instruction"
+    },
+    {
+      "name": "user",
+      "authority": "instruction"
+    },
+    {
+      "name": "tool",
+      "authority": "content"
+    },
+    {
+      "name": "retrieval",
+      "authority": "content"
+    },
+    {
+      "name": "quoted",
+      "authority": "content"
+    }
+  ],
+  "directives": [
+    {
+      "name": "reportLabel",
+      "default": "baseline",
+      "settableBy": "system"
+    },
+    {
+      "name": "citationMode",
+      "default": "required",
+      "settableBy": "user"
+    }
+  ],
+  "envelope": {
+    "open": "<untrusted-content channel=\"{channel}\" segment=\"{id}\">",
+    "close": "</untrusted-content>"
+  }
+}
