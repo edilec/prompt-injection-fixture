@@ -204,6 +204,14 @@ npm run check     # lint, tests, the runnable example, and a packaging dry run
 Zero runtime dependencies and zero development dependencies. Node 22 or newer,
 ESM, `node:test` and `node:assert/strict`.
 
+## Production context
+
+A passing fixture shows that this mock agent followed the declared precedence;
+it does not prove that a live RAG system resists prompt injection. Edilec's
+[RAG prompt-injection threat model](https://edilec.com/blog/cyb-11001/prompt-injection-threat-model-rag/)
+maps the separate ingestion, retrieval, context, tool and recovery boundaries
+that need their own controls and tests.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
