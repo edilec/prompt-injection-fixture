@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.1.0 — 2026-10-14
 
 ### Added
 
@@ -119,4 +119,4 @@ each with a test that fails when the guard is removed.
   refused unread, including one whose target does not exist; a root that is
   itself reached through a link is not falsely refused.
 
-No release has been published.
+GitHub source release v0.1.0 — 2026-10-14.
